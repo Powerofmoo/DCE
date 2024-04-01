@@ -1,0 +1,104 @@
+/* Buttons styling */
+
+.button-community {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* Matching font */
+  font-size: 0.9em; /* Consistent font size */
+  background-color: #476de7; /* Matching the header background color */
+  color: #ffffff; /* Text color matching the header text color */
+  padding: 10px 20px; /* Adequate padding for button size */
+  border: none; /* No border for a cleaner look */
+  border-radius: 5px; /* Slight rounding of corners for a modern look */
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.15); /* Consistent shadow with the table */
+  cursor: pointer; /* Change cursor to pointer on hover over the button */
+  transition: background-color 0.3s; /* Smooth transition for hover effect */
+}
+
+.button-community:hover {
+  background-color: #3154c5; /* Slightly darker shade on hover for interaction feedback */
+}
+
+
+/* General Table Styling */
+.table-community {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 20px 0;
+  font-size: 0.9em;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+}
+
+.table-community thead tr {
+  background-color: #476de7;
+  color: #ffffff;
+  text-align: left;
+}
+
+.table-community th,
+.table-community td {
+  padding: 12px 15px;
+}
+
+.table-community tbody tr {
+  border-bottom: 1px solid #dddddd;
+}
+
+/* Hover Effect for Rows */
+.table-community tbody tr:nth-of-type(even) {
+  background-color: #f3f3f3;
+}
+
+.table-community tbody tr:last-of-type {
+  border-bottom: 2px solid #476de7;
+}
+
+.table-community tbody tr:hover {
+  background-color: #f1f1f1;
+}
+
+/* Image Styling */
+.img-in-table {
+  width: auto; /* Adjust based on your needs */
+  height: 100px;
+  border-radius: 5px;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+}
+
+/* Description Text Styling */
+.desc-text {
+  color: #333;
+  line-height: 1.5;
+}
+
+/* Responsive Table */
+@media screen and (max-width: 600px) {
+  .table-community thead {
+    display: none;
+  }
+
+  .table-community, .table-community tbody, .table-community tr, .table-community td {
+    display: block;
+    width: 100%;
+  }
+
+  .table-community tr {
+    margin-bottom: 15px;
+  }
+
+  .table-community td {
+    text-align: right;
+    padding-left: 50%;
+    text-align: right;
+    position: relative;
+  }
+
+  .table-community td::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    width: 50%;
+    padding-left: 15px;
+    font-weight: bold;
+    text-align: left;
+  }
+}
