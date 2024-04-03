@@ -6,13 +6,15 @@ import Text "mo:base/Text";
 
 actor {
 
-    // managers
-    var DCEmanager: ?Principal = null;
+    // Managers
+    var DCEmanager : ?Principal = null;
     var managers : [Principal] = [];
 
+    // Initial amount constants
     let startAmountOrange = 20;
     let startAmountGreen = 20;
 
+    // LogonInfo structure
     type LogonInfo = {
         id: Text;
         name: Text;
@@ -20,17 +22,19 @@ actor {
         green: Nat;
     };
 
-    // account
+    // Account structure
     type Account = {
         orange: Nat;
         green: Nat;
     };
+
+    // Account TrieMap
     var accounts = TrieMap.TrieMap<Principal, Account>(Principal.equal, Principal.hash);
 
-    // name tabel
+    // Name table TrieMap
     var nameTable = TrieMap.TrieMap<Principal, Text>(Principal.equal, Principal.hash);
 
-    // ledger
+    // Transfer structure
     type Transfer = {
         authorization: Principal;
         from: Principal;
@@ -38,9 +42,13 @@ actor {
         orange: Nat;
         green: Nat;
         reason: Text;
-        dateTime: Text; 
+        dateTime: Text;
     };
+
+    // Transfer Buffer
     var transfers: Buffer.Buffer<Transfer> = Buffer.Buffer<Transfer>(10);
+
+    // TransferInfo structure
     type TransferInfo = {
         authorization: Principal;
         authorization_name: Text;
@@ -51,41 +59,40 @@ actor {
         orange: Nat;
         green: Nat;
         reason: Text;
-        dateTime: Text; 
+        dateTime: Text;
     };
 
-    // referals
+    // ReferStatus type
     type ReferStatus = {#Open; #Confirmed; #Blocked;};
-    type Referal = {
+
+    // Referral structure
+    type Referral = {
         id: Principal;
         status: ReferStatus;
     };
-    var emailReferals = TrieMap.TrieMap<Text, Referal>(Text.equal, Text.hash);
-    var telegramReferals = TrieMap.TrieMap<Text, Referal>(Text.equal, Text.hash);
 
-    // temporary accounts
+    // Referral TrieMaps
+    var emailReferrals = TrieMap.TrieMap<Text, Referral>(Text.equal, Text.hash);
+    var telegramReferrals = TrieMap.TrieMap<Text, Referral>(Text.equal, Text.hash);
+
+    // Temporary accounts TrieMaps
     var emailAccounts = TrieMap.TrieMap<Text, Account>(Text.equal, Text.hash);
     var telegramAccounts = TrieMap.TrieMap<Text, Account>(Text.equal, Text.hash);
 
 
-///////////////////////////
-//
-// private Functions
-//
-///////////////////////////
-
-
-    private func _create_account(principal: Principal) : () {
+    // Create account if it doesn't exist
+    private func _createAccount(principal: Principal) : () {
         if (null == accounts.get(principal)) {
             let account_new : Account = {
                 orange = startAmountOrange;
-                green =  startAmountGreen;
+                green = startAmountGreen;
             };
             accounts.put(principal, account_new);
         }
     };
 
-    private func _addTransfer(auth: Principal, from : Principal, to: Principal, orange: Nat, green: Nat, reason: Text ) {
+    // Add transfer to the buffer
+    private func _addTransfer(auth: Principal, from: Principal, to: Principal, orange: Nat, green: Nat, reason: Text) {
         let newTransfer = {
             authorization = auth;
             from = from;
@@ -98,330 +105,305 @@ actor {
         transfers.add(newTransfer);
     };
 
-    private func _transfer (auth: Principal, from: Principal, to: Principal, orange: Nat, green: Nat, reason: Text) :  (Bool) {
+    // Transfer between accounts
+    private func _transfer(auth: Principal, from: Principal, to: Principal, orange: Nat, green: Nat, reason: Text) : Bool {
+        // Ensure both accounts exist
+        _createAccount(from);
+        _createAccount(to);
 
-        // NOTE: this function is not concurret proof - hackathon modus
-        if (from == to) return false;
-
-         _create_account(from);  // Ensure account exists
-         _create_account(to);  // Ensure account exists
-
+        // Check if sender has sufficient balance
         let fromValues = switch (accounts.get(from)) {
-            case (null) { return false; };
             case (?values) { values };
+            case (null) { return false; };
         };
 
         if (fromValues.orange < orange or fromValues.green < green) {
             return false;
         };
 
+        // Deduct from sender and add to receiver
         let toValues = switch (accounts.get(to)) {
-            case (null) { {orange=0; green=0}; };
             case (?values) { values };
+            case (null) { {orange = 0; green = 0}; };
         };
 
-        accounts.put(from, {orange=fromValues.orange - orange; green=fromValues.green - green});
-        accounts.put(to, {orange=toValues.orange + orange; green=toValues.green + green});
+        accounts.put(from, {orange = fromValues.orange - orange; green = fromValues.green - green});
+        accounts.put(to, {orange = toValues.orange + orange; green = toValues.green + green});
 
-        // write in transfers
-        _addTransfer(auth, from, to , orange, green, reason);
+        // Add transfer to history
+        _addTransfer(auth, from, to, orange, green, reason);
 
         return true;
     };
 
-    private func _mint(auth: Principal, to: Principal, orange: Nat, green: Nat, reason: Text) :  (Bool) {
+    // Mint new tokens
+    private func _mint(auth: Principal, to: Principal, orange: Nat, green: Nat, reason: Text) : Bool {
+        // Ensure account exists
+        _createAccount(to);
 
-         _create_account(to);  // Ensure account exists
-
+        // Add tokens to the account
         let toValues = switch (accounts.get(to)) {
-            case (null) { {orange=0; green=0}; };
             case (?values) { values };
+            case (null) { {orange = 0; green = 0}; };
         };
 
-        accounts.put(to, {orange=toValues.orange + orange; green=toValues.green + green});
+        accounts.put(to, {orange = toValues.orange + orange; green = toValues.green + green});
 
-        // write in transfers
-        _addTransfer(auth, auth, to , orange, green, reason);
+        // Add transfer to history
+        _addTransfer(auth, auth, to, orange, green, reason);
 
         return true;
     }; 
 
-    private func _isManager(id: Principal, extended: Bool) : (Bool)
-    {
-        // check for superuser
+    // Check if caller is a manager
+    private func _isManager(id: Principal, extended: Bool) : Bool {
         switch (DCEmanager) {
-            case (null)
-                return false;
-            case (?manager)
-                if(manager == id) return true;
+            case (?manager):
+                if (manager == id) {
+                    return true;
+                };
+            default {};
         };
 
-        if (not extended) return false;
+        if (not extended) {
+            return false;
+        };
 
-        // check other managers
-        let exists = Array.find(managers, func (p: Principal) : Bool {
-            return Principal.equal(p, id);
+        return Array.exists(managers, func (p: Principal) : Bool {
+            Principal.equal(p, id);
         });
-        switch (exists) {
-            case null { return false; };
-            case _ { return true; };
-        };
- 
     };
-    
 
-///////////////////////////
-//
-// Management Functions
-//
-///////////////////////////
 
-  public shared (msg) func addManager(newManagerText: Text) : async (Bool) {
-    let newManager = Principal.fromText(newManagerText);
+    // Add a new manager
+    public shared (msg) func addManager(newManagerText: Text) : async Bool {
+        let newManager = Principal.fromText(newManagerText);
 
-    if ( not _isManager(msg.caller, false) ) return false;
+        if (not _isManager(msg.caller, false)) {
+            return false;
+        }
 
-    let exists = Array.find(managers, func (p: Principal) : Bool {
-      return Principal.equal(p, newManager);
-    });
-    switch (exists) {
-      case null {
-        managers := Array.append<Principal>(managers, [newManager]);
-      };
-      case _ {};
+        if (!Array.contains(managers, newManager)) {
+            managers := Array.append<Principal>(managers, [newManager]);
+        }
+
+        return true;
     };
-    return true;
-  };
 
-  public shared (msg) func listManagers() : async [Principal] {
-    if ( not _isManager(msg.caller, false) ) return [];
-    return managers;
-  };
+    // List all managers
+    public shared (msg) func listManagers() : async [Principal] {
+        if (not _isManager(msg.caller, false)) {
+            return [];
+        }
+        return managers;
+    };
 
-///////////////////////////
-//
-// Basic Account Funcs
-//
-///////////////////////////
-
+    // Get balance of an account
     public shared (msg) func getBalance(idText: Text) : async Account {
         var id = msg.caller;
-        if (idText != "") id := Principal.fromText(idText);
+        if (idText != "") {
+            id := Principal.fromText(idText);
+        }
 
-        if ( msg.caller != id and not _isManager(msg.caller, true) ) return {orange=0; green=0;} : Account;
- 
-         _create_account(id);  // Ensure account exists
+        if (msg.caller != id and not _isManager(msg.caller, true)) {
+            return {orange = 0; green = 0;};
+        }
+
+        _createAccount(id);  // Ensure account exists
         let optAccount = accounts.get(id);
+
         let account = switch (optAccount) {
-            case (null) { {orange=0; green=0;} : Account};
             case (?acc) {acc};
+            case (null) { {orange = 0; green = 0;}; };
         };
         return account;
     };
 
-    public shared (msg) func transfer(toText: Text, orange: Nat, green: Nat, reason: Text) : async (Bool) {
+    // Transfer tokens
+    public shared (msg) func transfer(toText: Text, orange: Nat, green: Nat, reason: Text) : async Bool {
         let to = Principal.fromText(toText);
         return _transfer(msg.caller, msg.caller, to, orange, green, reason);
     }; 
 
-    public shared (msg) func transaction(fromText:Text, toText: Text, orange: Nat, green: Nat, reason: Text) : async (Bool) {
+    // Transaction between accounts (only for managers)
+    public shared (msg) func transaction(fromText:Text, toText: Text, orange: Nat, green: Nat, reason: Text) : async Bool {
         let from = Principal.fromText(fromText);
         let to = Principal.fromText(toText);
-        if (not _isManager(msg.caller, true)) return false;
-
+        if (not _isManager(msg.caller, true)) {
+            return false;
+        }
         return _transfer(msg.caller, from, to, orange, green, reason);
     }; 
 
-///////////////////////////
-//
-// Buys and Grants
-//
-///////////////////////////
-
-    public shared (msg) func buy(toText: Text, orange: Nat, reason: Text) : async  (Bool) {
+    // Buy tokens (only for managers)
+    public shared (msg) func buy(toText: Text, orange: Nat, reason: Text) : async Bool {
         let auth = msg.caller;
         let to = Principal.fromText(toText);
-
-        if ( not _isManager(msg.caller, true) ) return false;
-        
-        return _mint (auth, to, orange, 0, reason);
-
+        if (not _isManager(msg.caller, true)) {
+            return false;
+        }
+        return _mint(auth, to, orange, 0, reason);
     }; 
 
-    public shared (msg) func grant(toText: Text, green: Nat, reason: Text) : async  (Bool) {
+    // Grant tokens (only for managers)
+    public shared (msg) func grant(toText: Text, green: Nat, reason: Text) : async Bool {
         let auth = msg.caller;
         let to = Principal.fromText(toText);
-
-        if (green > 10) return false;
-        
-        return _mint (auth, to, 0, green, reason);
-
+        if (green > 10 or not _isManager(msg.caller, true)) {
+            return false;
+        }
+        return _mint(auth, to, 0, green, reason);
     }; 
 
-    public shared (msg) func grantTelegram(to: Text, green: Nat, reason: Text) : async (Bool) {
+    // Grant tokens for Telegram referrals
+    public shared (msg) func grantTelegram(to: Text, green: Nat, reason: Text) : async Bool {
         let auth = msg.caller;
+        if (green > 10) {
+            return false;
+        }
 
-        if (green > 10) return false;
-        
-        // check if is already linked to account
-        switch (telegramReferals.get(to)) {
-            case (null) { 
-                // otherwise fall through
-             };
-            case (?value) { 
-                if (value.status == #Confirmed)
-                    return _mint (auth, value.id, 0, green, reason);
-                if (value.status == #Blocked)
-                    return false;
-                // otherwise fall through
-            }
+        let referral = switch (telegramReferrals.get(to)) {
+            case (?value) { value };
+            case (null) { {id = Principal.fromText(to); status = #Open;} };
         };
 
-        // otherwise, get/create from temporary subAccount
+        if (referral.status == #Confirmed) {
+            return _mint(auth, referral.id, 0, green, reason);
+        } else if (referral.status == #Blocked) {
+            return false;
+        }
+
         let account = switch (telegramAccounts.get(to)) {
-            case (null) { {orange=0; green=0;} };
             case (?value) { value };
+            case (null) { {orange = 0; green = 0;}; };
         };
         telegramAccounts.put(to, { orange = account.orange; green = account.green + green;});
 
         return true;
     }; 
 
-    public shared (msg) func grantEmail(to: Text, green: Nat, reason: Text) : async (Bool) {
+    // Grant tokens for Email referrals
+    public shared (msg) func grantEmail(to: Text, green: Nat, reason: Text) : async Bool {
         let auth = msg.caller;
-        
-        if (green > 10) return false;
-        
-        // check if is already linked to account
-        switch (emailReferals.get(to)) {
-            case (null) { 
-                // otherwise fall through
-             };
-            case (?value) { 
-                if (value.status == #Confirmed)
-                    return _mint (auth, value.id, 0, green, reason);
-                if (value.status == #Blocked)
-                    return false;
-                // otherwise fall through
-            }
+        if (green > 10) {
+            return false;
+        }
+
+        let referral = switch (emailReferrals.get(to)) {
+            case (?value) { value };
+            case (null) { {id = Principal.fromText(to); status = #Open;} };
         };
 
-        // otherwise, get/create from temporary subAccount
+        if (referral.status == #Confirmed) {
+            return _mint(auth, referral.id, 0, green, reason);
+        } else if (referral.status == #Blocked) {
+            return false;
+        }
+
         let account = switch (emailAccounts.get(to)) {
-            case (null) { {orange=0; green=0}; };
             case (?value) { value };
+            case (null) { {orange = 0; green = 0;}; };
         };
         emailAccounts.put(to, { orange = account.orange; green = account.green + green;});
 
         return true;
     }; 
 
-///////////////////////////
-//
-// Identity matching
-//
-///////////////////////////
-
-    public shared (msg) func setName(name: Text) : async (Bool) {
+    // Set name for the caller
+    public shared (msg) func setName(name: Text) : async Bool {
         nameTable.put(msg.caller, name);
         return true;
     };
 
-    public shared (msg) func getName() : async (Text) {
-        return switch ( nameTable.get(msg.caller) ) {
+    // Get name of the caller
+    public shared (msg) func getName() : async Text {
+        return switch (nameTable.get(msg.caller)) {
+            case (?name) { name };
             case (null) { "" };
-            case (?name) { name }
         };
     };
 
-
-    public shared (msg) func claimTelegram(idText: Text, referal: Text) : async (Bool) {
+    // Claim Telegram referral
+    public shared (msg) func claimTelegram(idText: Text, referral: Text) : async Bool {
         var id = msg.caller;
-        if (idText != "") id := Principal.fromText(idText);
-        let auth = msg.caller;
+        if (idText != "") {
+            id := Principal.fromText(idText);
+        }
 
-        if ( msg.caller != id and not _isManager(msg.caller, true) ) return false;
+        if (msg.caller != id and not _isManager(msg.caller, true)) {
+            return false;
+        }
 
-        // check if is already linked to account
-        switch (telegramReferals.get(referal)) {
-            case (null) { 
-                // otherwise fall through
-             };
-            case (?value) { 
-                if (value.status == #Confirmed)
-                    return true;
-                if (value.status == #Blocked)
-                    return false;
-                // otherwise fall through
-            }
-        };
-        
-        // otherwise, link and transfer coins (if any)
-        telegramReferals.put(referal, {id = id; status = #Confirmed;});
-        switch (telegramAccounts.get(referal)) {
-            case (null) { /* */ };
-            case (?value) { 
-                var dum = _mint (auth, id, 0, value.green, "(from Telegram)" );
-                telegramAccounts.delete(referal);
-             };
+        let referralInfo = switch (telegramReferrals.get(referral)) {
+            case (?value) { value };
+            case (null) { {id = id; status = #Open;} };
         };
 
-        return true;
+        if (referralInfo.status == #Confirmed) {
+            return true;
+        } else if (referralInfo.status == #Blocked) {
+            return false;
+        }
+
+        telegramReferrals.put(referral, {id = id; status = #Confirmed;});
+
+        let account = switch (telegramAccounts.get(referral)) {
+            case (?value) { value };
+            case (null) { {orange = 0; green = 0;}; };
+        };
+        let mintSuccess = _mint(msg.caller, id, 0, account.green, "(from Telegram)" );
+        telegramAccounts.delete(referral);
+
+        return mintSuccess;
     };
 
-    public shared (msg) func claimEmail(idText: Text, referal: Text) : async (Bool) {
+    // Claim Email referral
+    public shared (msg) func claimEmail(idText: Text, referral: Text) : async Bool {
         var id = msg.caller;
-        if (idText != "") id := Principal.fromText(idText);
-        let auth = msg.caller;
+        if (idText != "") {
+            id := Principal.fromText(idText);
+        }
 
-        if ( msg.caller != id and not _isManager(msg.caller, true) ) return false;
+        if (msg.caller != id and not _isManager(msg.caller, true)) {
+            return false;
+        }
 
-        // check if is already linked to account
-        switch (emailReferals.get(referal)) {
-            case (null) { 
-                // otherwise fall through
-             };
-            case (?value) { 
-                if (value.status == #Confirmed)
-                    return true;
-                if (value.status == #Blocked)
-                    return false;
-                // otherwise fall through
-            }
+        let referralInfo = switch (emailReferrals.get(referral)) {
+            case (?value) { value };
+            case (null) { {id = id; status = #Open;} };
         };
-        
-        // otherwise, link and transfer coins (if any)
-        emailReferals.put(referal, {id = id; status = #Confirmed;});
-        switch (emailAccounts.get(referal)) {
-            case (null) { /* */ };
-            case (?value) { 
-                var dum = _mint (auth, id, 0, value.green, "(from email " # referal # ")" );
-                emailAccounts.delete(referal);
-             };
-        };    
 
-        return true;
+        if (referralInfo.status == #Confirmed) {
+            return true;
+        } else if (referralInfo.status == #Blocked) {
+            return false;
+        }
+
+        emailReferrals.put(referral, {id = id; status = #Confirmed;});
+
+        let account = switch (emailAccounts.get(referral)) {
+            case (?value) { value };
+            case (null) { {orange = 0; green = 0;}; };
+        };
+        let mintSuccess = _mint(msg.caller, id, 0, account.green, "(from email " # referral # ")" );
+        emailAccounts.delete(referral);
+
+        return mintSuccess;
     };
 
-
-///////////////////////////
-//
-// Misc
-//
-///////////////////////////
-
+    // Lookup name by Principal ID
     private func _lookupName(id: Principal) : Text {
-        var found = nameTable.get(id);
-        return switch (found) {
-            case (null) {""};
-            case (?found) {found}
+        return switch (nameTable.get(id)) {
+            case (?found) { found };
+            case (null) { "" };
         };
     };
 
-    public shared (msg) func showTransfers () : async ( [TransferInfo] ) {
+    // Get transfer history for the caller
+    public shared (msg) func showTransfers () : async [TransferInfo] {
         let id = msg.caller;
 
-        var outputBuf: Buffer.Buffer<TransferInfo> = Buffer.Buffer<TransferInfo>(10);
+        var transferInfos: Buffer.Buffer<TransferInfo> = Buffer.Buffer<TransferInfo>(10);
         Buffer.iterate<Transfer>(transfers, func (elem) {
             if (elem.from == id or elem.to == id) {
                 let transferInfo : TransferInfo = {
@@ -436,35 +418,34 @@ actor {
                     reason              = elem.reason;
                     dateTime            = elem.dateTime;      
                 };
-                outputBuf.add(transferInfo);
+                transferInfos.add(transferInfo);
             };
         });
 
-        return Buffer.toArray<TransferInfo>(outputBuf); // Convert the buffer to an array
+        return Buffer.toArray<TransferInfo>(transferInfos);
     };
 
-///////////////////////////
-//
-// Debug
-//
-///////////////////////////
-
-    public func dumpTelegram(id: Text) : async ?Referal {
-        return telegramReferals.get(id);
+    // Get Telegram referral information for debugging
+    public func dumpTelegram(id: Text) : async ?Referral {
+        return telegramReferrals.get(id);
     };
 
-    public func dumpTelegramAccount(id:Text) : async ?Account {
-            return telegramAccounts.get(id);
+    // Get Telegram referral account information for debugging
+    public func dumpTelegramAccount(id: Text) : async ?Account {
+        return telegramAccounts.get(id);
     }; 
 
-    public func dumpEmail(id: Text) : async ?Referal {
-        return emailReferals.get(id);
+    // Get Email referral information for debugging
+    public func dumpEmail(id: Text) : async ?Referral {
+        return emailReferrals.get(id);
     };
 
-    public func dumpEmailAccount(id:Text) : async ?Account {
-            return emailAccounts.get(id);
+    // Get Email referral account information for debugging
+    public func dumpEmailAccount(id: Text) : async ?Account {
+        return emailAccounts.get(id);
     }; 
 
+    // Get user info (manager or user)
     public shared (msg) func userInfo() : async Text {
         switch(DCEmanager) {
             case (null) {
@@ -477,13 +458,15 @@ actor {
         return "user";
     };
 
+    // Get Principal ID of the caller
     public shared (msg) func whoami() : async Text {
         return Principal.toText(msg.caller);
     };
 
+    // Logon function
     public shared (msg) func logon() : async LogonInfo {
 
-        // if no manager, set manager in the process
+        // If no manager, set manager to the caller
         switch(DCEmanager) {
             case (null) {
                 DCEmanager := ?msg.caller;
@@ -492,17 +475,19 @@ actor {
             };
         };
 
-        // gather info
+        // Gather user info
         var id = Principal.toText(msg.caller);
         var name = switch (nameTable.get(msg.caller)) {
-            case (null) {""};
-            case (?name) {name}
+            case (?name) { name };
+            case (null) { "" };
         };
-        _create_account(msg.caller);  // Ensure account exists
+
+        _createAccount(msg.caller);  // Ensure account exists
         let account = accounts.get(msg.caller);
+
         let acc = switch (account) {
-            case (null) { {orange=0; green=0;} : Account};
             case (?acc) {acc};
+            case (null) { {orange = 0; green = 0;}; };
         };
 
         return {
@@ -511,6 +496,5 @@ actor {
             orange = acc.orange;
             green = acc.green;
         };
-
     };
 };
